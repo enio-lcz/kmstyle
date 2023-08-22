@@ -709,3 +709,74 @@ def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), d
     print('新函数提示示例保存在./autoGmail_project/untested functions/%s/%s_prompt.json文件中' % (function_name, function_name))
     print('done')
     return function_name
+
+
+def prompt_modified(function_name, system_content='推理链修改.md', model="gpt-3.5-turbo-16k", g=globals()):
+    """
+    智能邮件项目的外部函数审查函数，用于审查外部函数创建流程提示是否正确以及最终创建的代码是否正确
+    :param function_name: 必要参数，字符串类型，表示审查对象名称；
+    :param system_content: 可选参数，默认取值为字符串推理链修改.md，表示此时审查函数外部挂载文档名称，需要是markdwon格式文档；
+    :param model: 可选参数，表示调用的Chat模型，默认选取gpt-4-0613；
+    :param g: 可选参数，表示extract_function_code函数作用域，默认为globals()，即在当前操作空间全域内生效；
+    :return：审查结束后新创建的函数名称
+    """
+    print("正在执行审查函数，审查对象：%s" % function_name)
+    with open(system_content, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+        
+    # 读取原函数全部提示内容
+    with open('./autoGmail_project/untested functions/%s/%s_prompt.json' % (function_name, function_name), 'r') as f:
+        msg = json.load(f)
+    
+    # 将其保存为字符串
+    msg_str = json.dumps(msg)
+    
+    # 进行审查
+    response = openai.ChatCompletion.create(
+                    model=model,
+                    messages=[
+                    {"role": "system", "content": md_content},
+                    {"role": "user", "content": '以下是一个错误的智能邮件项目的推理链，请你按照要求对其进行修改：%s' % msg_str}
+                    ]
+                )
+    
+    modified_result = response.choices[0].message['content']
+    
+    def extract_json(s):
+        pattern = r'```[jJ][sS][oO][nN]\s*({.*?})\s*```'
+        match = re.search(pattern, s, re.DOTALL)
+        if match:
+            return match.group(1)
+        else:
+            return s
+    
+    modified_json = extract_json(modified_result)
+    
+    # 提取函数源码
+    code = json.loads(modified_json)['stage2'][1]['content']
+    
+    # 提取函数名
+    match = re.search(r'def (\w+)', code)
+    function_name = match.group(1)
+    
+    print("审查结束，新的函数名称为：%s。\n正在运行该函数定义过程，并保存函数源码与prompt" % function_name)
+    
+    exec(code, g)
+    
+    # 在untested文件夹内创建函数同名文件夹
+    directory = './autoGmail_project/untested functions/%s' % function_name
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        
+    # 写入函数
+    with open('./autoGmail_project/untested functions/%s/%s_module.py' % (function_name, function_name), 'w', encoding='utf-8') as f:
+        f.write(code)
+        
+    # 写入提示
+    with open('./autoGmail_project/untested functions/%s/%s_prompt.json' % (function_name, function_name), 'w') as f:
+        json.dump(json.loads(modified_json), f)
+    
+    print('新函数提示示例保存在./autoGmail_project/untested functions/%s/%s_prompt.json文件中' % (function_name, function_name))
+    print("%s函数已在当前操作空间定义，可以进行效果测试" % function_name)
+    
+    return function_name
