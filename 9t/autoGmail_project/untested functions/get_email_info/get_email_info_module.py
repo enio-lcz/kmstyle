@@ -15,7 +15,7 @@ def get_email_info(userId='me', n=1):
     # 创建 Gmail API 客户端
     service = build('gmail', 'v1', credentials=creds)
 
-    # 获取邮件列表
+    # 查询邮件列表
     results = service.users().messages().list(userId=userId).execute()
     messages = results.get('messages', [])[:n]
 
