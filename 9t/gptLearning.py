@@ -780,3 +780,168 @@ def prompt_modified(function_name, system_content='推理链修改.md', model="g
     print("%s函数已在当前操作空间定义，可以进行效果测试" % function_name)
     
     return function_name
+
+def get_email_info(userId='me', n=1):
+    """
+    获取指定邮箱的第一封邮件的信息。
+
+    参数：
+    userId: 要查询的邮箱的用户ID，默认为'me'，表示当前授权的用户。
+    n: 要查询的邮件的索引，默认为1，表示查询第一封邮件。
+
+    返回：
+    一个字典，包含邮件的收件时间、发送人和邮件内容的键值对，键包括 '收件时间'、'发送人' 和 '邮件内容'。
+    """
+    # 从本地文件中加载凭据
+    creds = Credentials.from_authorized_user_file('token.json')
+
+    # 创建 Gmail API 客户端
+    service = build('gmail', 'v1', credentials=creds)
+
+    # 查询邮件列表
+    results = service.users().messages().list(userId=userId).execute()
+    messages = results.get('messages', [])[:n]
+
+    email_info = {}
+
+    if messages:
+        message = messages[0]
+        msg = service.users().messages().get(userId=userId, id=message['id']).execute()
+
+        # 解码邮件内容
+        payload = msg['payload']
+        headers = payload.get("headers")
+        parts = payload.get("parts")
+
+        if headers:
+            for header in headers:
+                name = header.get("name")
+                if name.lower() == "from":
+                    email_info['发送人'] = header.get("value")
+                if name.lower() == "date":
+                    email_info['收件时间'] = parser.parse(header.get("value")).strftime('%Y-%m-%d %H:%M:%S')
+
+        if parts:
+            for part in parts:
+                mimeType = part.get("mimeType")
+                body = part.get("body")
+                if mimeType == "text/plain":
+                    data_decoded = base64.urlsafe_b64decode(body.get("data")).decode()
+                    email_info['邮件内容'] = data_decoded
+                elif mimeType == "text/html":
+                    data_decoded = base64.urlsafe_b64decode(body.get("data")).decode()
+                    soup = BeautifulSoup(data_decoded, "html.parser")
+                    email_info['邮件内容'] = soup.get_text()
+
+    return json.dumps(email_info)
+
+
+def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=globals()):
+
+    def test_messages(ueser_content):
+        messages = [{"role": "system", "content": "阿新的邮箱地址是:ax909@163.com"},
+                    {"role": "system", "content": "我的邮箱地址是:jrdnnest@gmail.com"},
+                    {"role": "user", "content": ueser_content}]
+        return messages
+            
+    messages = test_messages(req)
+    
+    new_function = globals()[function_name]
+    functions_list = [new_function]
+    
+    print("根据既定用户需求req进行%s函数功能测试，请确保当该函数已经在当前操作空间定义..." % function_name)
+    
+    # 有可能在run_conversation环节报错
+    # 若没报错，则运行：
+    try:
+        final_response = run_conversation(messages=messages, functions_list=functions_list, model=model)
+        print("当前函数运行结果：'%s'" % final_response)
+        
+        feedback = input("函数功能是否满足要求 (yes/no)? ")
+        if feedback.lower() == 'yes':
+            print("函数功能通过测试，正在将函数写入tested文件夹")
+            remove_to_tested(function_name)
+            print('done')
+        else:
+            next_step = input("函数功能未通过测试，是1.需要再次进行测试，还是2.进入debug流程？")
+            if next_step == '1':
+                print("准备再次测试...")
+                function_test(function_name, req, few_shot)
+            else:
+                solution = input("请选择debug方案：\n1.再次执行函数创建流程，并测试结果；\n2.执行审查函数\
+                \n3.重新输入用户需求；\n4.退出程序，进行手动尝试")
+                if solution == '1':
+                    # 再次运行函数创建过程
+                    print("好的，正在尝试再次创建函数，请稍等...")
+                    few_shot_str = input("准备再次测试，请问是1.采用此前Few-shot方案，还是2.带入全部函数示例进行Few-shot？")
+                    if few_shot_str == '1':
+                        function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g)
+                    else:
+                        function_name = code_generate(req=req, few_shot='all', model=model, g=g)
+                    function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                elif solution == '2':
+                    # 执行审查函数
+                    print("好的，执行审查函数，请稍等...")
+                    function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g)
+                    # 接下来带入进行测试
+                    print("新函数已创建，接下来带入进行测试...")
+                    function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                elif solution == '3':
+                    new_req = input("好的，请再次输入用户需求，请注意，用户需求描述方法将极大程度影响最终函数创建结果。")
+                    few_shot_str = input("接下来如何运行代码创建函数？1.采用此前Few-shot方案；\n2.使用全部外部函数作为Few-shot")
+                    if few_shot_str == '1':
+                        function_name = code_generate(req=new_req, few_shot=few_shot, model=model, g=g)
+                    else:
+                        function_name = code_generate(req=new_req, few_shot='all', model=model, g=g)
+                    function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g)
+                elif solution == '4':
+                    print("好的，预祝debug顺利~")
+        
+    # run_conversation报错时则运行：
+    except Exception as e:
+        next_step = input("run_conversation无法正常运行，接下来是1.再次运行运行run_conversation，还是2.进入debug流程？")
+        if next_step == '1':
+            function_test(function_name, req, few_shot)
+        else:
+            solution = input("请选择debug方案：\n1.再次执行函数创建流程，并测试结果；\n2.执行审查函数\
+            \n3.重新输入用户需求；\n4.退出程序，进行手动尝试")
+            if solution == '1':
+                # 再次运行函数创建过程
+                print("好的，正在尝试再次创建函数，请稍等...")
+                few_shot_str = input("准备再次测试，请问是1.采用此前Few-shot方案，还是2.带入全部函数示例进行Few-shot？")
+                if few_shot_str == '1':
+                    function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g)
+                else:
+                    function_name = code_generate(req=req, few_shot='all', model=model, g=g)
+                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+            elif solution == '2':
+                # 执行审查函数
+                print("好的，执行审查函数，请稍等...")
+                max_attempts = 3
+                attempts = 0
+
+                while attempts < max_attempts:
+                    try:
+                        function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g)
+                        break  # 如果代码成功执行，跳出循环
+                    except Exception as e:
+                        attempts += 1  # 增加尝试次数
+                        print("发生错误：", e)
+                        if attempts == max_attempts:
+                            print("已达到最大尝试次数，程序终止。")
+                            raise  # 重新引发最后一个异常
+                        else:
+                            print("正在重新运行审查程序...")
+                # 接下来带入进行测试
+                print("新函数已创建，接下来带入进行测试...")
+                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+            elif solution == '3':
+                new_req = input("好的，请再次输入用户需求，请注意，用户需求描述方法将极大程度影响最终函数创建结果。")
+                few_shot_str = input("接下来如何运行代码创建函数？1.采用此前Few-shot方案；\n2.使用全部外部函数作为Few-shot")
+                if few_shot_str == '1':
+                    function_name = code_generate(req=new_req, few_shot=few_shot, model=model, g=g)
+                else:
+                    function_name = code_generate(req=new_req, few_shot='all', model=model, g=g)
+                function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g)
+            elif solution == '4':
+                print("好的，预祝debug顺利~")
