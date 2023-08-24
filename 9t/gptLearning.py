@@ -945,3 +945,8 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
                 function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g)
             elif solution == '4':
                 print("好的，预祝debug顺利~")
+
+
+def Gmail_auto_func(req, few_shot='all', model='gpt-3.5-turbo', g=globals(), detail=0):
+    function_name = code_generate(req, few_shot=few_shot, model=model, g=g, detail=detail)
+    function_test(function_name=function_name, req=req, few_shot=few_shot, model=model, g=g)
