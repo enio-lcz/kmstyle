@@ -25,6 +25,7 @@ import json
 import base64
 from email.header import decode_header
 
+import time
 
 openai.api_key = os.getenv('OPENAI_API_KEY')
 open_weather_key = os.getenv('OPENWEATHER_API_KEY')
@@ -589,8 +590,37 @@ def show_functions(tested=False, if_print=False):
     
     return files_and_directories
 
+def get_decompose_results(req, model='gpt-3.5-turbo-16k'):
+    """
+    复杂需求拆解函数，能够将用户输入的复杂需求拆解为一系列更容易完成的子任务
+    :param req: 必选参数，以字符串形式表示，用于表示用户输入的原始需求；
+    :param model: 拆解需求所使用的大模型；
+    :return：由子任务所组成的列表；
+    """
+    
+    decompose_results = []
+    
+    with open('./autoGmail_project/tested functions/decompose_messages.json', 'r') as f:
+        decompose_messages = json.load(f)
+        
+    decompose_messages.append({"role": "user", "content": req})
+    
+    response = openai.ChatCompletion.create(
+                model=model,
+                messages=decompose_messages
+            )
+    
+    res = response.choices[0].message['content']
+    
+    # 使用正则表达式查找以1、2、3开始的句子
+    matches = re.findall(r'\d\.(.*?。)', res)
 
-def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), detail=0):
+    for match in matches:
+        decompose_results.append(match)
+        
+    return decompose_results
+
+def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), detail=0, system_messages=None):
     """
     Function calling外部函数自动创建函数，可以根据用户的需求，直接将其翻译为Chat模型可以直接调用的外部函数代码。
     :param req: 必要参数，字符串类型，表示输入的用户需求；
@@ -599,6 +629,7 @@ def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), d
     :param model: 可选参数，表示调用的Chat模型，默认选取gpt-4-0613；
     :param g: 可选参数，表示extract_function_code函数作用域，默认为globals()，即在当前操作空间全域内生效；
     :param detail: 可选参数，默认取值为0，还可以取值为1，表示extract_function_code函数打印新创建的外部函数细节；
+    :param system_messages: 可选参数，默认取值为None，此时读取本地system_messages.json作为系统信息，也可以自定义；
     :return：新创建的函数名称。需要注意的是，在函数创建时，该函数也会在当前操作空间被定义，后续可以直接调用；
     """
     
@@ -610,8 +641,9 @@ def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), d
     # few_shot_functions = [globals()[name] for name in few_shot_functions_name]
     
     # 读取各阶段系统提示
-    with open('./autoGmail_project/tested functions/system_messages.json', 'r') as f:
-        system_messages = json.load(f)
+    if system_messages == None:
+        with open('./autoGmail_project/tested functions/system_messages.json', 'r') as f:
+            system_messages = json.load(f)
         
     # 各阶段提示message对象
     few_shot_messages_CM = []
@@ -711,18 +743,23 @@ def code_generate(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), d
     return function_name
 
 
-def prompt_modified(function_name, system_content='推理链修改.md', model="gpt-3.5-turbo-16k", g=globals()):
+def prompt_modified(function_name, system_content='推理链修改.md', model="gpt-4-0613", g=globals(), system_messages=None):
     """
     智能邮件项目的外部函数审查函数，用于审查外部函数创建流程提示是否正确以及最终创建的代码是否正确
     :param function_name: 必要参数，字符串类型，表示审查对象名称；
     :param system_content: 可选参数，默认取值为字符串推理链修改.md，表示此时审查函数外部挂载文档名称，需要是markdwon格式文档；
     :param model: 可选参数，表示调用的Chat模型，默认选取gpt-4-0613；
     :param g: 可选参数，表示extract_function_code函数作用域，默认为globals()，即在当前操作空间全域内生效；
+    :param system_messages: 可选参数，默认取值为None，此时读取本地system_messages.json作为系统信息，也可以自定义；
     :return：审查结束后新创建的函数名称
     """
     print("正在执行审查函数，审查对象：%s" % function_name)
+    
+    if system_messages != None:
+        system_content='复杂需求推理链修改.md'
+        
     with open(system_content, 'r', encoding='utf-8') as f:
-        md_content = f.read()
+        md_content = f.read()  
         
     # 读取原函数全部提示内容
     with open('./autoGmail_project/untested functions/%s/%s_prompt.json' % (function_name, function_name), 'r') as f:
@@ -836,11 +873,11 @@ def get_email_info(userId='me', n=1):
     return json.dumps(email_info)
 
 
-def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=globals()):
+def function_test(function_name, req, few_shot, model="gpt-4-0613", g=globals(), system_messages=None):
 
     def test_messages(ueser_content):
-        messages = [{"role": "system", "content": "阿新的邮箱地址是:ax909@163.com"},
-                    {"role": "system", "content": "我的邮箱地址是:jrdnnest@gmail.com"},
+        messages = [{"role": "system", "content": "端木天的邮箱地址是:2323365771@qq.com"},
+                    {"role": "system", "content": "我的邮箱地址是:ksken166@gmail.com"},
                     {"role": "user", "content": ueser_content}]
         return messages
             
@@ -866,7 +903,7 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
             next_step = input("函数功能未通过测试，是1.需要再次进行测试，还是2.进入debug流程？")
             if next_step == '1':
                 print("准备再次测试...")
-                function_test(function_name, req, few_shot)
+                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g, system_messages=system_messages)
             else:
                 solution = input("请选择debug方案：\n1.再次执行函数创建流程，并测试结果；\n2.执行审查函数\
                 \n3.重新输入用户需求；\n4.退出程序，进行手动尝试")
@@ -875,25 +912,23 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
                     print("好的，正在尝试再次创建函数，请稍等...")
                     few_shot_str = input("准备再次测试，请问是1.采用此前Few-shot方案，还是2.带入全部函数示例进行Few-shot？")
                     if few_shot_str == '1':
-                        function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g)
+                        Gmail_auto_func(req=req, few_shot=few_shot, model=model, g=g)
                     else:
-                        function_name = code_generate(req=req, few_shot='all', model=model, g=g)
-                    function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                        Gmail_auto_func(req=req, few_shot='all', model=model, g=g)
                 elif solution == '2':
                     # 执行审查函数
                     print("好的，执行审查函数，请稍等...")
-                    function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g)
+                    function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g, system_messages=system_messages)
                     # 接下来带入进行测试
                     print("新函数已创建，接下来带入进行测试...")
-                    function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                    function_test(function_name=function_name, req=req, few_shot=few_shot, g=g, system_messages=system_messages)
                 elif solution == '3':
                     new_req = input("好的，请再次输入用户需求，请注意，用户需求描述方法将极大程度影响最终函数创建结果。")
                     few_shot_str = input("接下来如何运行代码创建函数？1.采用此前Few-shot方案；\n2.使用全部外部函数作为Few-shot")
                     if few_shot_str == '1':
-                        function_name = code_generate(req=new_req, few_shot=few_shot, model=model, g=g)
+                        Gmail_auto_func(req=req, few_shot=few_shot, model=model, g=g)
                     else:
-                        function_name = code_generate(req=new_req, few_shot='all', model=model, g=g)
-                    function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g)
+                        Gmail_auto_func(req=req, few_shot='all', model=model, g=g)
                 elif solution == '4':
                     print("好的，预祝debug顺利~")
         
@@ -901,7 +936,7 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
     except Exception as e:
         next_step = input("run_conversation无法正常运行，接下来是1.再次运行运行run_conversation，还是2.进入debug流程？")
         if next_step == '1':
-            function_test(function_name, req, few_shot)
+            function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g, system_messages=system_messages)
         else:
             solution = input("请选择debug方案：\n1.再次执行函数创建流程，并测试结果；\n2.执行审查函数\
             \n3.重新输入用户需求；\n4.退出程序，进行手动尝试")
@@ -910,10 +945,9 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
                 print("好的，正在尝试再次创建函数，请稍等...")
                 few_shot_str = input("准备再次测试，请问是1.采用此前Few-shot方案，还是2.带入全部函数示例进行Few-shot？")
                 if few_shot_str == '1':
-                    function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g)
+                    Gmail_auto_func(req=req, few_shot=few_shot, model=model, g=g)
                 else:
-                    function_name = code_generate(req=req, few_shot='all', model=model, g=g)
-                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                    Gmail_auto_func(req=req, few_shot='all', model=model, g=g)
             elif solution == '2':
                 # 执行审查函数
                 print("好的，执行审查函数，请稍等...")
@@ -922,7 +956,7 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
 
                 while attempts < max_attempts:
                     try:
-                        function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g)
+                        function_name = prompt_modified(function_name=function_name, model="gpt-3.5-turbo-16k-0613", g=g, system_messages=system_messages)
                         break  # 如果代码成功执行，跳出循环
                     except Exception as e:
                         attempts += 1  # 增加尝试次数
@@ -934,19 +968,79 @@ def function_test(function_name, req, few_shot, model="gpt-3.5-turbo-16k", g=glo
                             print("正在重新运行审查程序...")
                 # 接下来带入进行测试
                 print("新函数已创建，接下来带入进行测试...")
-                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g)
+                function_test(function_name=function_name, req=req, few_shot=few_shot, g=g, system_messages=system_messages)
             elif solution == '3':
                 new_req = input("好的，请再次输入用户需求，请注意，用户需求描述方法将极大程度影响最终函数创建结果。")
                 few_shot_str = input("接下来如何运行代码创建函数？1.采用此前Few-shot方案；\n2.使用全部外部函数作为Few-shot")
                 if few_shot_str == '1':
-                    function_name = code_generate(req=new_req, few_shot=few_shot, model=model, g=g)
+                    Gmail_auto_func(req=req, few_shot=few_shot, model=model, g=g)
                 else:
-                    function_name = code_generate(req=new_req, few_shot='all', model=model, g=g)
-                function_test(function_name=function_name, req=new_req, few_shot=few_shot, g=g)
+                    Gmail_auto_func(req=req, few_shot='all', model=model, g=g)
             elif solution == '4':
                 print("好的，预祝debug顺利~")
 
 
-def Gmail_auto_func(req, few_shot='all', model='gpt-3.5-turbo', g=globals(), detail=0):
-    function_name = code_generate(req, few_shot=few_shot, model=model, g=g, detail=detail)
-    function_test(function_name=function_name, req=req, few_shot=few_shot, model=model, g=g)
+def Gmail_auto_func(req, few_shot='all', model='gpt-3.5-turbo-16k', g=globals(), detail=0):
+    # 默认情况下system_messages = None
+    system_messages = None
+    
+    # 尝试进行任务拆解
+    try:
+        decompose_results = get_decompose_results(req=req, model=model)
+    except Exception as e:
+        print(e)
+        print('暂停1分钟后继续调用模型')
+        time.sleep(60)
+        decompose_results = get_decompose_results(req=req, model=model)
+        
+    # 如果只拆解得到多个任务，则创建新的基于任务拆解得到的system_message
+    if len(decompose_results) != 1:
+        print('原始需求将拆分为多个子需求并进行分段代码创建与合并')
+        # 读取原始system_message
+        with open('./autoGmail_project/tested functions/system_messages.json', 'r') as f:
+            system_messages = json.load(f)
+            
+        # 用于存储全部需求的函数代码
+        sub_func_all = ''
+        # 用于存储全部需求
+        sub_req_all = ''
+        # 计数器
+        i = 0
+        
+        for sub_req in decompose_results:
+            i += 1
+            # 每个需求依次创建子函数
+            print('第%s个子需求为：%s' % (i, sub_req))
+            print('正在创建对应子函数')
+            try:
+                sub_func_name = code_generate(sub_req, few_shot=few_shot, g=g, detail=detail, model=model)
+            except Exception as e:
+                print(e)
+                print('暂停1分钟后继续调用模型')
+                time.sleep(60)
+                sub_func_name = code_generate(sub_req, few_shot=few_shot, g=g, detail=detail, model=model)
+                
+            # 读取子函数源码
+            with open('./autoGmail_project/untested functions/%s/%s_module.py' % (sub_func_name, sub_func_name), encoding='utf-8') as f:
+                sub_func_str = f.read()
+            # 对子函数源码进行拼接
+            sub_func_all += sub_func_str
+            
+            # 按顺序拼接子需求
+            sub_req_all += str(i)+('.')
+            sub_req_all += sub_req            
+        
+        print('子需求对应的子函数全部创建完毕，接下来进入到原始需求函数创建过程...')
+        # 添加一个system_message
+        decompose_description = '对于当前编程需求，可以拆解为若干个子需求，也就是：%s。这些子需求的实现方式可以参考如下代码：%s' % (sub_req_all, sub_func_all)
+        system_messages['system_message'].append({'role': 'system', 'content': decompose_description})
+    
+    # 进行代码创建和代码审查
+    try:
+        function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g, detail=detail, system_messages=system_messages)
+    except Exception as e:
+        print(e)
+        print('暂停1分钟后继续调用模型')
+        time.sleep(60)
+        function_name = code_generate(req=req, few_shot=few_shot, model=model, g=g, detail=detail, system_messages=system_messages)
+    function_test(function_name=function_name, req=req, few_shot=few_shot, model=model, g=g, system_messages=system_messages)
